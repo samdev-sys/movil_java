@@ -318,49 +318,70 @@ public void run() {
 
 // 2. Nueva función para limpiar y reconstruir el VIN (0902)
 private String procesarVIN(String rawData) {
-    // 1. Limpieza inicial: eliminamos eco, prompt y espacios sobrantes
+    // Elimina el eco del comando y el prompt final
     String limpio = rawData.replace(">", "").replace("0902", "").trim();
     
-    // 2. Separamos por líneas (tramas)
-    String[] lineas = limpio.split("[\r\n]+");
+    // El VIN en CAN Bus viene segmentado por \r
+    String[] tramas = limpio.split("\r");
     StringBuilder vinHex = new StringBuilder();
 
-    for (String linea : lineas) {
-        String l = linea.trim().replace(" ", "");
-        if (l.isEmpty()) continue;
+    for (String trama : tramas) {
+        String t = trama.trim().replace(" ", "");
+        if (t.isEmpty()) continue;
 
-        // Manejo de tramas CAN (Multiframe)
-        // Ejemplo: 0: 49 02 01 ... -> El dato empieza después de 490201
-        if (l.startsWith("0:")) {
-            // Quitamos el '0:' y los primeros 6 caracteres (49 02 01)
-            String data = l.substring(2);
-            if (data.startsWith("4902")) {
-                vinHex.append(data.substring(6)); // Saltamos 49 (servicio), 02 (PID), XX (count)
+        // Si tiene el formato de tramas CAN (0:, 1:, 2:)
+        if (t.matches("^[0-9]:.*")) {
+            String contenido = t.substring(2);
+            // La primera trama (0:) suele incluir 4902 (Service + PID)
+            if (contenido.startsWith("4902")) {
+                vinHex.append(contenido.substring(6)); // Saltamos 49 02 y el byte de contador
             } else {
-                vinHex.append(data);
+                vinHex.append(contenido);
             }
         } 
-        else if (l.startsWith("1:") || l.startsWith("2:")) {
-            // Tramas consecutivas: quitamos solo el prefijo '1:' o '2:'
-            vinHex.append(l.substring(2));
-        }
-        else if (l.length() > 10) {
-            // Si el adaptador no envía prefijos 0:, 1: pero envía tramas largas
-            if (l.startsWith("4902")) {
-                vinHex.append(l.substring(6));
-            } else {
-                vinHex.append(l);
-            }
+        // Si viene sin índices pero es una respuesta larga
+        else if (t.length() > 10) {
+            if (t.startsWith("4902")) vinHex.append(t.substring(6));
+            else vinHex.append(t);
         }
     }
 
-    // El VIN real tiene 17 caracteres. En Hexadecimal son 34 caracteres.
     String resultado = vinHex.toString();
-    
-    // Si el string es muy largo, tomamos los últimos 34 caracteres (el VIN suele estar al final)
+    // Un VIN son 17 caracteres = 34 caracteres hexadecimales
     if (resultado.length() > 34) {
         resultado = resultado.substring(resultado.length() - 34);
     }
-    
     return resultado;
+}
+
+private void procesarRespuestaValida(String respuesta) {
+    LogUtils.d(TAG, "Procesando Respuesta Final: " + respuesta);
+    
+    // 1. Avisar a la cola de comandos que ya puede enviar el siguiente
+    if (DataServer.getInstance().servicesCheckProcesos != null) {
+        DataServer.getInstance().servicesCheckProcesos.comandoSiguiente = true;
+    }
+
+    // 2. Lógica de envío al servidor si banMessage está activo
+    if (banMessage) {
+        final String date = DateUtils.getDateFormatted();
+        String prefix = NetworkManager.getInstance().isNetworkConnected() ? "" : "SI";
+        String dataFull = prefix + "###" + date + respuesta;
+
+        DataServer.getInstance().enviarMsgAlServer(dataFull, Utils.TipoEnvioDef.COMANDO);
+        
+        // Limpiar estados
+        if (DataServer.getInstance().servicesCheckProcesos != null) {
+            DataServer.getInstance().servicesCheckProcesos.banMessage = false;
+        }
+        banMessage = false;
+    }
+
+    // 3. Notificar a la UI
+    StateNotification.getInstance().notifyState("OBD: " + ComandoOBD + " :: " + respuesta);
+    
+    // 4. Eliminar el proceso actual de la lista de pendientes
+    if (DataServer.getInstance().servicesCheckProcesos != null) {
+        DataServer.getInstance().servicesCheckProcesos.popProceso();
+    }
 }
