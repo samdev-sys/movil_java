@@ -40,35 +40,25 @@ public class LogUtils {
         escribirArchivo(TAG, "Error: " + msj);
     }
 
-    public static void v(String TAG, String msj) {
-        Log.v(TAG, msj);
-        escribirArchivo(TAG, "Verbose: " + msj);
-    }
-
-    private static void escribirArchivo(String TAG, String msj) {
+    private static void escribirArchivo(String TAG, String texto) {
         if (PATH == null) {
-            Log.e("LogUtils", "PATH is not initialized. Make sure to call LogUtils.initialize(context) first.");
+            Log.e(TAG1, "LogUtils path not initialized. Cannot write to file.");
             return;
         }
-
-        String fileName = "Log.txt";
         try {
-            File file = new File(PATH + fileName);
-            File directory = new File(file.getParent());
-            if (!directory.exists() && !directory.mkdirs()) {
-                Log.e(TAG, "Could not create directory: " + directory.getAbsolutePath());
-                return;
-            }
+            final SimpleDateFormat sdf = new SimpleDateFormat("yyyy_MM_dd", Locale.getDefault());
+            final String fileName = "log_monitoreo_" + sdf.format(new Date()) + ".txt";
+            final File file = new File(PATH, fileName);
 
-            fileName = file.getAbsolutePath();
-            FileWriter outputStream = new FileWriter(fileName, true);
-            Date fecha = new Date(Calendar.getInstance().getTimeInMillis());
-            SimpleDateFormat formatter = new SimpleDateFormat("dd-MM-yyyy HH:mm:ss", Locale.getDefault());
-            outputStream.write("\nFecha: " + formatter.format(fecha) + " TAG: " + TAG + " -> MSG: " + msj);
-            outputStream.close();
+            final SimpleDateFormat sdf2 = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault());
+            final String time = sdf2.format(Calendar.getInstance().getTime());
 
+            final FileWriter writer = new FileWriter(file, true);
+            writer.append(time).append("  ").append(TAG).append("  ").append(texto).append("\n");
+            writer.flush();
+            writer.close();
         } catch (Exception e) {
-            Log.e("LogUtils", "Error writing to log file: " + e.toString());
+            Log.e("ERROR", "CATCH: " + e);
         }
     }
 }
