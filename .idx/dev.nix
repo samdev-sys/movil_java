@@ -10,6 +10,12 @@
     # pkgs.python311Packages.pip
     # pkgs.nodejs_20
     # pkgs.nodePackages.nodemon
+    pkgs.jdk11 # Added Java Development Kit 11 for Android development
+    pkgs.gradle # Added Gradle to regenerate wrapper files
+    (pkgs.android-sdk.override {
+      # All platform, build-tools, and other SDK component licenses are accepted.
+      acceptAndroidSdkLicenses = true;
+    })
   ];
   # Sets environment variables in the workspace
   env = {};
