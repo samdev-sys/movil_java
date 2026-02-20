@@ -20,6 +20,8 @@ import com.icass.chatfirebase.managers.ConnectionManager.EstadoConexionDef;
 import com.icass.chatfirebase.managers.NetworkManager;
 import com.icass.chatfirebase.managers.ResourceManager;
 import com.icass.chatfirebase.notifications.StateNotification;
+import com.icass.chatfirebase.services.CheckearColaComandos.EventCheckProcesos;
+import com.icass.chatfirebase.services.Procesos;
 import com.icass.chatfirebase.utils.Constants;
 import com.icass.chatfirebase.utils.DateUtils;
 import com.icass.chatfirebase.utils.LogUtils;
@@ -55,13 +57,16 @@ public class ConexionBluetooth extends Thread {
         this.service = service;
         this.banHiloSiempre = true;
 
-        DataServer.initInstance().initialize(service, (comandoEnv, banMess) -> {
-            try {
-                ComandoOBD = comandoEnv;
-                banMessage = banMess;
-                write(comandoEnv);
-            } catch (Exception ex) {
-                Log.e(TAG, "Error al enviar: " + ex.getMessage());
+        DataServer.initInstance().initialize(service, new EventCheckProcesos() {
+            @Override
+            public void enviarOBD(String comandoEnv, boolean banMess) {
+                try {
+                    ComandoOBD = comandoEnv;
+                    banMessage = banMess;
+                    write(comandoEnv);
+                } catch (Exception ex) {
+                    Log.e(TAG, "Error al enviar: " + ex.getMessage());
+                }
             }
         }, listener);
     }
@@ -112,7 +117,7 @@ public class ConexionBluetooth extends Thread {
 
     @Override
     public void run() {
-        LogUtils.d(TAG, "Hilo iniciado - Corrección Multitrama (VIN) activa");
+        LogUtils.d(TAG, "Hilo iniciado - Monitor de VIN Multitrama activo");
         this.banHiloSiempre = true;
         if (!intentandoConexion) {
             intentandoConexion = true;
@@ -131,16 +136,20 @@ public class ConexionBluetooth extends Thread {
                     String fragmento = new String(buffer, 0, bytesRead);
                     bufferAcumulado.append(fragmento);
 
-                    // CLAVE: El adaptador ELM327 envía ">" cuando termina de responder
+                    // CLAVE: El adaptador ELM327 envía ">" al terminar la respuesta completa
                     if (fragmento.contains(">")) {
                         String respuestaCompleta = bufferAcumulado.toString().trim();
-                        LogUtils.d(TAG, "Respuesta Raw Completa: " + respuestaCompleta);
+                        LogUtils.d(TAG, "Respuesta Raw: " + respuestaCompleta);
 
                         if (ComandoOBD != null && ComandoOBD.contains("0902")) {
-                            // PROCESAMIENTO ESPECIAL VIN (Múltiples tramas)
+                            // PROCESAMIENTO MULTITRAMA PARA EL VIN
                             respuestaOBD = procesarVIN(respuestaCompleta);
+                        } else if (ComandoOBD != null && ComandoOBD.equals("03")) {
+                            // Lógica para códigos de error
+                            respuestaOBD = respuestaCompleta.replaceAll("[\r\n ]", "").replace(">", "");
+                            soloComando("1"); 
                         } else {
-                            // PROCESAMIENTO ESTÁNDAR (Comandos cortos)
+                            // Respuesta estándar
                             respuestaOBD = respuestaCompleta.replaceAll("[\r\n ]", "").replace(">", "");
                         }
 
@@ -150,7 +159,7 @@ public class ConexionBluetooth extends Thread {
                             desbloquearCola();
                         }
                         
-                        bufferAcumulado.setLength(0); // Limpiar para el siguiente comando
+                        bufferAcumulado.setLength(0); // Limpiar buffer para el siguiente comando
                     }
                 } catch (IOException e) {
                     handleError();
@@ -160,9 +169,6 @@ public class ConexionBluetooth extends Thread {
         }
     }
 
-    /**
-     * Une las tramas 0:, 1:, 2: del VIN eliminando prefijos de protocolo.
-     */
     private String procesarVIN(String rawData) {
         String data = rawData.replace(">", "").replace("0902", "").trim();
         String[] lineas = data.split("\r");
@@ -203,16 +209,20 @@ public class ConexionBluetooth extends Thread {
         }
 
         StateNotification.getInstance().notifyState("OBD " + ComandoOBD + ": " + respuesta);
-        
-        if (DataServer.getInstance().servicesCheckProcesos != null) {
-            DataServer.getInstance().servicesCheckProcesos.popProceso();
-        }
+        desbloquearCola();
     }
 
     private void desbloquearCola() {
         if (DataServer.getInstance().servicesCheckProcesos != null) {
             DataServer.getInstance().servicesCheckProcesos.comandoSiguiente = true;
             DataServer.getInstance().servicesCheckProcesos.popProceso();
+        }
+    }
+
+    private void soloComando(@NonNull String comandoEnv) {
+        if(DataServer.getInstance().servicesCheckProcesos != null) {
+            final Procesos proceso = new Procesos(true, comandoEnv, false, true);
+            DataServer.getInstance().servicesCheckProcesos.pushProcesoMessage(proceso);
         }
     }
 
@@ -236,6 +246,17 @@ public class ConexionBluetooth extends Thread {
             Intent intent = new Intent(context, alarmEstadoVehiculo.class);
             pendingIntent = PendingIntent.getBroadcast(context, 7235, intent, PendingIntent.FLAG_IMMUTABLE);
             alarmManager.setRepeating(AlarmManager.ELAPSED_REALTIME_WAKEUP, SystemClock.elapsedRealtime(), Constants.INTERVAL_30_SECONDS, pendingIntent);
+        }
+    }
+
+    public void cerrar() {
+        try {
+            this.banHiloSiempre = false;
+            if(this.socket != null) this.socket.close();
+            this.inputStream = null;
+            this.outputStream = null;
+        } catch (Exception ex) {
+            LogUtils.e(TAG,"Error al cerrar: " + ex.getMessage());
         }
     }
 }
