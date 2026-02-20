@@ -13,10 +13,8 @@ import android.util.Log;
 
 import androidx.annotation.NonNull;
 
-import com.icass.chatfirebase.activity.MainActivity2;
 import com.icass.chatfirebase.activity.PrincipalActivity;
 import com.icass.chatfirebase.broadcasts.alarmEstadoVehiculo;
-import com.icass.chatfirebase.data.LocalData;
 import com.icass.chatfirebase.interfaces.CallbackService;
 import com.icass.chatfirebase.managers.ConnectionManager;
 import com.icass.chatfirebase.managers.ConnectionManager.EstadoConexionDef;
@@ -25,7 +23,6 @@ import com.icass.chatfirebase.managers.ProgressManager;
 import com.icass.chatfirebase.managers.ProgressManager.ProgresoDef;
 import com.icass.chatfirebase.managers.ResourceManager;
 import com.icass.chatfirebase.notifications.StateNotification;
-import com.icass.chatfirebase.services.CheckearColaComandos;
 import com.icass.chatfirebase.services.Procesos;
 import com.icass.chatfirebase.utils.Constants;
 import com.icass.chatfirebase.utils.DateUtils;
@@ -33,67 +30,51 @@ import com.icass.chatfirebase.utils.LogUtils;
 import com.icass.chatfirebase.utils.Utils;
 import com.icass.chatfirebase.utils.Utils.TipoEnvioDef;
 
-import org.json.JSONArray;
-import org.json.JSONObject;
-
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.util.UUID;
 
 public class ConexionBluetooth extends Thread {
-    private static final String TAG = ConexionBluetooth.class.getSimpleName();
+    private static final String TAG = "ConexionBluetooth";
 
     private boolean banHiloSiempre;
-    public boolean banIniciar = true;
-    private boolean bluetoothEncendido = false;
     private boolean intentandoConexion = false;
     private boolean comandoAuxiliar = false;
-
     private AlarmManager alarmManager;
     private PendingIntent pendingIntent;
 
     @NonNull
     private final BluetoothDevice bluetoothDevice;
     public boolean banMessage;
-    public String diagnosticoSI = "";
-    public String fallaSI = "";
-    public boolean banApagado = false;
-    private boolean Ban_Message_velocidad = false;
     private String comando = "1";
-    public static final String comando0105 = "0105";
-    public static final String NODATA = "DATA";
-    public boolean banderaComandos = false;
     private String ComandoOBD = "";
     private final Service service;
     private InputStream inputStream;
     private OutputStream outputStream;
     private BluetoothSocket socket;
-    private boolean primeraConexion;
     private String respuestaOBD = "";
 
     public ConexionBluetooth(@NonNull BluetoothDevice bluetoothDevice, @NonNull Service service, @NonNull CallbackService listener) {
         this.bluetoothDevice = bluetoothDevice;
         this.service = service;
         this.banHiloSiempre = true;
-        primeraConexion = true;
 
         DataServer.initInstance().initialize(service, (comandoEnv, banMess) -> {
             try {
                 ComandoOBD = comandoEnv;
                 banMessage = banMess;
                 write(comandoEnv);
-                banderaComandos = comandoEnv.contains(comando0105);
             } catch (Exception ex) {
-                Log.e(TAG, "ERROR AL ENVIAR AL OBD: " + ex);
+                Log.e(TAG, "Error al enviar: " + ex.getMessage());
             }
         }, listener);
     }
 
     private void iniciarConexion() {
-        LogUtils.d(TAG, "Intentando Conexion Bluetooth con: " + bluetoothDevice.getName());
+        LogUtils.d(TAG, "Conectando a: " + bluetoothDevice.getName());
         try {
-            final ParcelUuid[] uuids = this.bluetoothDevice.getUuids();
+            ParcelUuid[] uuids = this.bluetoothDevice.getUuids();
             for (ParcelUuid uuid : uuids) {
                 this.socket = this.bluetoothDevice.createInsecureRfcommSocketToServiceRecord(UUID.fromString(uuid.toString()));
                 this.socket.connect();
@@ -102,13 +83,10 @@ public class ConexionBluetooth extends Thread {
                 break;
             }
             intentandoConexion = false;
-            bluetoothEncendido = true;
-            DataServer.getInstance().servicesCheckProcesos.resetBanderas();
             iniciarEnvioConfiguracion();
         } catch (IOException ex) {
             ConnectionManager.getInstance().setEstadoActual(EstadoConexionDef.ESTADO_DESCONECTADO);
-            ProgressManager.getInstance().setProgreso(ProgresoDef.ESTADO_DESCONECTADO);
-            Utils.sleep(TAG + " Reintentando en 30s", 30000);
+            Utils.sleep("Reintentando en 15s", 15000);
             intentandoConexion = false;
             iniciarConexion();
         }
@@ -117,37 +95,34 @@ public class ConexionBluetooth extends Thread {
     private void iniciarEnvioConfiguracion() {
         crearAlarma();
         try {
-            DataServer.getInstance().banHiloSiempre = true;
             if (ComandoOBD != null && ComandoOBD.trim().length() >= 2) {
                 DataServer.getInstance().setInitComandosWeb();
             } else {
-                DataServer.getInstance().initConfiguracion("Conexion Bluetooth");
+                DataServer.getInstance().initConfiguracion("Inicio");
             }
-        } catch (Exception ex) {
-            handleReconnection();
+        } catch (Exception e) {
+            handleError();
         }
     }
 
     public void write(@NonNull String message) throws IOException {
-        message = message.contains("AT") ? message : message + "1";
-        final String data = message + "\r";
+        String data = (message.contains("AT") ? message : message + "1") + "\r";
         if (outputStream != null) {
             outputStream.write(data.getBytes());
             outputStream.flush();
         } else {
-            handleReconnection();
+            handleError();
         }
     }
 
     @Override
     public void run() {
-        LogUtils.d(TAG, "-------- Hilo BT Iniciado (Fix Multitrama) ----------");
+        LogUtils.d(TAG, "Hilo iniciado - Corrección Multitrama activa");
         this.banHiloSiempre = true;
         if (!intentandoConexion) {
             intentandoConexion = true;
             iniciarConexion();
         }
-        Utils.sleep("2", 2000);
 
         StringBuilder mSb = new StringBuilder();
 
@@ -158,34 +133,32 @@ public class ConexionBluetooth extends Thread {
                     int bytesRead = inputStream.read(buffer);
                     if (bytesRead <= 0) continue;
 
-                    String strReceived = new String(buffer, 0, bytesRead);
-                    mSb.append(strReceived);
+                    String part = new String(buffer, 0, bytesRead);
+                    mSb.append(part);
 
-                    // Esperamos el prompt '>' que indica fin de respuesta
-                    if (strReceived.contains(">")) {
-                        String respuestaRaw = mSb.toString().trim();
-                        
-                        // 1. Procesamiento según el comando
+                    // Esperamos el prompt '>' que indica fin de transmisión del OBD
+                    if (part.contains(">")) {
+                        String fullResponse = mSb.toString().trim();
+                        LogUtils.d(TAG, "Raw acumulado: " + fullResponse);
+
                         if (ComandoOBD != null && ComandoOBD.contains("0902")) {
-                            respuestaOBD = procesarVIN(respuestaRaw);
-                        } else if (ComandoOBD != null && ComandoOBD.equals("03")) {
-                            respuestaOBD = respuestaRaw.replaceAll("[\r\n ]", "").replace(">", "");
-                            Ban_Message_velocidad = true;
-                            soloComando(comando);
+                            // PROCESAMIENTO ESPECIAL PARA VIN (Múltiples líneas)
+                            respuestaOBD = procesarVIN(fullResponse);
                         } else {
-                            respuestaOBD = respuestaRaw.replaceAll("[\r\n ]", "").replace(">", "");
+                            // PROCESAMIENTO ESTÁNDAR (Comandos cortos)
+                            respuestaOBD = fullResponse.replaceAll("[\r\n ]", "").replace(">", "");
                         }
 
-                        // 2. Validación y envío
                         if (respuestaValida(ComandoOBD, respuestaOBD, comandoAuxiliar)) {
-                            procesarRespuestaValida(respuestaOBD);
+                            enviarYContinuar(respuestaOBD);
                         } else {
-                            liberarCola();
+                            desbloquearCola();
                         }
-                        mSb.setLength(0);
+                        
+                        mSb.setLength(0); // Limpiamos buffer para el siguiente comando
                     }
                 } catch (IOException e) {
-                    handleReconnection();
+                    handleError();
                     break;
                 }
             }
@@ -193,90 +166,76 @@ public class ConexionBluetooth extends Thread {
     }
 
     private String procesarVIN(String rawData) {
-        String limpio = rawData.replace(">", "").replace("0902", "").trim();
-        String[] tramas = limpio.split("\r");
-        StringBuilder vinHex = new StringBuilder();
+        // Elimina ecos y prompt
+        String data = rawData.replace(">", "").replace("0902", "").trim();
+        String[] tramas = data.split("\r");
+        StringBuilder vinBuilder = new StringBuilder();
+
         for (String trama : tramas) {
             String t = trama.trim().replace(" ", "");
             if (t.isEmpty()) continue;
+
+            // Filtro para tramas CAN (0:, 1:, 2:)
             if (t.matches("^[0-9]:.*")) {
-                String contenido = t.substring(2);
-                if (contenido.startsWith("4902")) vinHex.append(contenido.substring(6));
-                else vinHex.append(contenido);
-            } else if (t.length() > 10) {
-                if (t.startsWith("4902")) vinHex.append(t.substring(6));
-                else vinHex.append(t);
+                String clean = t.substring(2);
+                if (clean.startsWith("4902")) vinBuilder.append(clean.substring(6));
+                else vinBuilder.append(clean);
+            } 
+            else if (t.length() > 10) {
+                if (t.startsWith("4902")) vinBuilder.append(t.substring(6));
+                else vinBuilder.append(t);
             }
         }
-        String resultado = vinHex.toString();
-        return resultado.length() > 34 ? resultado.substring(resultado.length() - 34) : resultado;
+
+        String result = vinBuilder.toString();
+        // El VIN son 17 caracteres (34 en hex). Tomamos los últimos 34.
+        return result.length() > 34 ? result.substring(result.length() - 34) : result;
     }
 
-    private void procesarRespuestaValida(String respuesta) {
+    private void enviarYContinuar(String respuesta) {
+        // Desbloquear flujo para que no se congele la cola
         if (DataServer.getInstance().servicesCheckProcesos != null) {
             DataServer.getInstance().servicesCheckProcesos.comandoSiguiente = true;
         }
 
         if (banMessage) {
-            final String date = DateUtils.getDateFormatted();
+            String date = DateUtils.getDateFormatted();
             String prefix = NetworkManager.getInstance().isNetworkConnected() ? "" : "SI";
             DataServer.getInstance().enviarMsgAlServer(prefix + "###" + date + respuesta, TipoEnvioDef.COMANDO);
             banMessage = false;
         }
 
-        StateNotification.getInstance().notifyState("OBD: " + ComandoOBD + " -> " + respuesta);
-        liberarCola();
+        StateNotification.getInstance().notifyState("OBD " + ComandoOBD + ": " + respuesta);
+        desbloquearCola();
     }
 
-    private void liberarCola() {
+    private void desbloquearCola() {
         if (DataServer.getInstance().servicesCheckProcesos != null) {
             DataServer.getInstance().servicesCheckProcesos.comandoSiguiente = true;
             DataServer.getInstance().servicesCheckProcesos.popProceso();
         }
     }
 
-    private void handleReconnection() {
+    private void handleError() {
         if (!intentandoConexion) {
             intentandoConexion = true;
-            bluetoothEncendido = false;
             iniciarConexion();
-        }
-    }
-
-    private void soloComando(@NonNull String comandoEnv) {
-        if (DataServer.getInstance().servicesCheckProcesos != null) {
-            final Procesos proceso = new Procesos(true, comandoEnv, false, true);
-            DataServer.getInstance().servicesCheckProcesos.pushProcesoMessage(proceso);
         }
     }
 
     public boolean respuestaValida(String comando, String respuestaInicial, Boolean comAuxiliar) {
         if (comAuxiliar) { comandoAuxiliar = false; return true; }
         if (comando == null) return false;
-        if (!comando.contains("AT") && !comando.contains(Constants.comandoEncendido)) {
-            return !respuestaInicial.contains(NODATA);
-        }
-        return true;
+        return !respuestaInicial.contains("DATA") && !respuestaInicial.contains("ERROR");
     }
 
     public void crearAlarma() {
-        final Context context = ResourceManager.getInstance().getContext();
+        Context context = ResourceManager.getInstance().getContext();
         if (alarmManager == null) {
             alarmManager = (AlarmManager) context.getSystemService(Context.ALARM_SERVICE);
             Intent intent = new Intent(context, alarmEstadoVehiculo.class);
             pendingIntent = PendingIntent.getBroadcast(context, 7235, intent, PendingIntent.FLAG_IMMUTABLE);
             alarmManager.setRepeating(AlarmManager.ELAPSED_REALTIME_WAKEUP, SystemClock.elapsedRealtime(), Constants.INTERVAL_30_SECONDS, pendingIntent);
-        }
-    }
-
-    public void cerrar() {
-        try {
-            bluetoothEncendido = false;
-            this.banHiloSiempre = false;
-            if (this.socket != null) this.socket.close();
-            banApagado = true;
-        } catch (Exception ex) {
-            Log.e(TAG, "Error al cerrar socket");
         }
     }
 }
