@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="colorPrimary">#6200EE</color>
+    <color name="colorPrimaryDark">#3700B3</color>
+    <color name="colorAccent">#03DAC5</color>
+
+    <color name="colorRojo">#ffcf463d</color>
+    <color name="colorTema">#ff337ab7</color>
+    <color name="colorTemaDark">#ff0e4b80</color>
+    <color name="colorTemaFocus">#ff65b2f4</color>
+    <color name="negro">#000000</color>
+    <color name="Rojo">#FF0000</color>
+</resources>

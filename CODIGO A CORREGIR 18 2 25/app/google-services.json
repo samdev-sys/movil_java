@@ -1,0 +1,49 @@
+{
+  "project_info": {
+    "project_number": "312696313183",
+    "firebase_url": "https://obdii-b1c60-default-rtdb.firebaseio.com",
+    "project_id": "obdii-b1c60",
+    "storage_bucket": "obdii-b1c60.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:312696313183:android:7e24dac2b4df2e96d792ea",
+        "android_client_info": {
+          "package_name": "com.egmvdev.obdiim"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCTYwWp6YsIyc4lTY1ResYNl3RRwBhe5Hw"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:312696313183:android:837769c63ddeef64d792ea",
+        "android_client_info": {
+          "package_name": "com.icass.chatfirebase"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCTYwWp6YsIyc4lTY1ResYNl3RRwBhe5Hw"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
