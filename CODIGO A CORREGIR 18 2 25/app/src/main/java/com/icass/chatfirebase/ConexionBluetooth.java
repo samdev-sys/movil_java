@@ -318,37 +318,49 @@ public void run() {
 
 // 2. Nueva función para limpiar y reconstruir el VIN (0902)
 private String procesarVIN(String rawData) {
-    // 1. Limpieza inicial: quitamos el eco del comando y el prompt
+    // 1. Limpieza inicial: eliminamos eco, prompt y espacios sobrantes
     String limpio = rawData.replace(">", "").replace("0902", "").trim();
     
-    // 2. Dividimos por líneas (el OBD envía \r o \r\n entre tramas)
-    String[] lineas = limpio.split("\r");
+    // 2. Separamos por líneas (tramas)
+    String[] lineas = limpio.split("[\r\n]+");
     StringBuilder vinHex = new StringBuilder();
 
     for (String linea : lineas) {
-        String l = linea.trim().replace(" ", ""); // Quitamos espacios intermedios
+        String l = linea.trim().replace(" ", "");
         if (l.isEmpty()) continue;
 
-        // Si la línea tiene el índice de trama (0:, 1:, 2:), lo quitamos
-        if (l.matches("^[0-9]:.*")) {
-            vinHex.append(l.substring(2));
+        // Manejo de tramas CAN (Multiframe)
+        // Ejemplo: 0: 49 02 01 ... -> El dato empieza después de 490201
+        if (l.startsWith("0:")) {
+            // Quitamos el '0:' y los primeros 6 caracteres (49 02 01)
+            String data = l.substring(2);
+            if (data.startsWith("4902")) {
+                vinHex.append(data.substring(6)); // Saltamos 49 (servicio), 02 (PID), XX (count)
+            } else {
+                vinHex.append(data);
+            }
         } 
-        // Si es la línea de respuesta positiva pero sin índice (común en el primer frame)
-        else if (l.startsWith("4902")) {
-            // El primer frame a veces trae el contador de bytes (ej: 490201...)
-            // Dependiendo del vehículo, el VIN empieza tras el '4902' + 1 byte de modo
-            vinHex.append(l);
+        else if (l.startsWith("1:") || l.startsWith("2:")) {
+            // Tramas consecutivas: quitamos solo el prefijo '1:' o '2:'
+            vinHex.append(l.substring(2));
         }
-        // Si es una línea de datos pura (más de 10 caracteres hex)
         else if (l.length() > 10) {
-            vinHex.append(l);
+            // Si el adaptador no envía prefijos 0:, 1: pero envía tramas largas
+            if (l.startsWith("4902")) {
+                vinHex.append(l.substring(6));
+            } else {
+                vinHex.append(l);
+            }
         }
     }
 
+    // El VIN real tiene 17 caracteres. En Hexadecimal son 34 caracteres.
     String resultado = vinHex.toString();
     
-    // Opcional: Si el VIN empieza con 4902 (Respuesta Servicio 09 PID 02), 
-    // a menudo los primeros caracteres no son parte del VIN ASCII. 
-    // Los 17 caracteres del VIN suelen estar al final.
+    // Si el string es muy largo, tomamos los últimos 34 caracteres (el VIN suele estar al final)
+    if (resultado.length() > 34) {
+        resultado = resultado.substring(resultado.length() - 34);
+    }
+    
     return resultado;
 }
