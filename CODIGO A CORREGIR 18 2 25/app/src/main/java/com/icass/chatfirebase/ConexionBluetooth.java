@@ -265,51 +265,52 @@ public class ConexionBluetooth extends Thread {
     }
 
     @Override
-    public void run() {
-        LogUtils.d(TAG, "--------Se inicia Hilo de clase Conexion Bluetooth----------");
-        this.banHiloSiempre = true;
-        if (!intentandoConexion){
-            intentandoConexion = true;
-            iniciarConexion();
-        }
-        Utils.sleep("2", 2000);
+public void run() {
+    LogUtils.d(TAG, "--------Se inicia Hilo de clase Conexion Bluetooth----------");
+    this.banHiloSiempre = true;
+    if (!intentandoConexion) {
+        intentandoConexion = true;
+        iniciarConexion();
+    }
+    Utils.sleep("2", 2000);
 
-        String errorSent = "";
-        StringBuilder mSb = new StringBuilder();
+    StringBuilder mSb = new StringBuilder();
 
-    while(this.banHiloSiempre) {
-        if(inputStream != null) {
+    while (this.banHiloSiempre) {
+        if (inputStream != null) {
             try {
                 byte[] buffer = new byte[1024];
                 int bytesRead = inputStream.read(buffer);
                 if (bytesRead == -1) continue;
-                
+
                 String strReceived = new String(buffer, 0, bytesRead);
                 mSb.append(strReceived);
 
-                // El adaptador OBD siempre envía un ">" cuando termina de responder un comando
-                if (mSb.toString().contains(">")) {
+                // Esperamos hasta que el ELM327 nos de la señal de "listo" (>)
+                if (strReceived.contains(">")) {
                     String respuestaCompleta = mSb.toString().trim();
                     
-                    // Si el comando es 0902, procesamos la respuesta multilínea
-                    if (ComandoOBD.contains("0902")) {
+                    // Identificamos el tipo de procesamiento según el comando enviado
+                    if (ComandoOBD != null && ComandoOBD.contains("0902")) {
                         respuestaOBD = procesarVIN(respuestaCompleta);
                     } else {
-                        // Respuesta estándar para comandos cortos
-                        respuestaOBD = respuestaCompleta.replace("\r", "").replace("\n", "").replace(" ", "").replace(">", "");
+                        // Limpieza estándar para comandos cortos (010D, 0105, etc.)
+                        respuestaOBD = respuestaCompleta.replaceAll("[\r\n ]", "").replace(">", "");
                     }
 
                     LogUtils.d(TAG, "Respuesta Final Procesada: " + respuestaOBD);
-                    
-                    // Ejecutar validación y envío al servidor
+
                     if (respuestaValida(ComandoOBD, respuestaOBD, comandoAuxiliar)) {
+                        // Llamamos a la lógica interna de procesamiento y envío
                         procesarRespuestaValida(respuestaOBD);
                     }
 
-                    mSb.setLength(0); // Limpiar buffer para el siguiente comando
+                    mSb.setLength(0); // Vaciamos el buffer para el siguiente comando
                 }
             } catch (IOException e) {
-                // ... manejo de desconexión ...
+                LogUtils.e(TAG, "Error de lectura BT: " + e.getMessage());
+                // Aquí deberías gestionar la reconexión
+                break; 
             }
         }
     }
@@ -317,58 +318,37 @@ public class ConexionBluetooth extends Thread {
 
 // 2. Nueva función para limpiar y reconstruir el VIN (0902)
 private String procesarVIN(String rawData) {
-    // Ejemplo de entrada: 
-    // 014 \r 0:490214E345841 \r 1:4C324D334E3543 \r 2:30313233343536 >
-    
-    // Eliminamos el prompt y el comando de eco si existe
+    // 1. Limpieza inicial: quitamos el eco del comando y el prompt
     String limpio = rawData.replace(">", "").replace("0902", "").trim();
     
-    // Dividimos por líneas
+    // 2. Dividimos por líneas (el OBD envía \r o \r\n entre tramas)
     String[] lineas = limpio.split("\r");
     StringBuilder vinHex = new StringBuilder();
 
     for (String linea : lineas) {
-        String l = linea.trim();
-        // Saltamos la línea de longitud (014) y quitamos los prefijos de trama (0:, 1:, 2:)
-        if (l.startsWith("0:") || l.startsWith("1:") || l.startsWith("2:")) {
-            vinHex.append(l.substring(2)); // Quitamos los dos primeros caracteres (ej: "0:")
-        } else if (l.length() > 10 && !l.contains(":")) {
-            // Algunos adaptadores no ponen el "0:", simplemente envían la trama
+        String l = linea.trim().replace(" ", ""); // Quitamos espacios intermedios
+        if (l.isEmpty()) continue;
+
+        // Si la línea tiene el índice de trama (0:, 1:, 2:), lo quitamos
+        if (l.matches("^[0-9]:.*")) {
+            vinHex.append(l.substring(2));
+        } 
+        // Si es la línea de respuesta positiva pero sin índice (común en el primer frame)
+        else if (l.startsWith("4902")) {
+            // El primer frame a veces trae el contador de bytes (ej: 490201...)
+            // Dependiendo del vehículo, el VIN empieza tras el '4902' + 1 byte de modo
+            vinHex.append(l);
+        }
+        // Si es una línea de datos pura (más de 10 caracteres hex)
+        else if (l.length() > 10) {
             vinHex.append(l);
         }
     }
 
-    // El VIN hex suele empezar con 4902 (Respuesta positiva al 0902)
     String resultado = vinHex.toString();
-    if (resultado.startsWith("4902")) {
-        // Opcional: convertir de Hex a ASCII aquí si deseas el VIN legible
-        // o enviarlo así para que el servidor lo convierta.
-        return resultado; 
-    }
     
+    // Opcional: Si el VIN empieza con 4902 (Respuesta Servicio 09 PID 02), 
+    // a menudo los primeros caracteres no son parte del VIN ASCII. 
+    // Los 17 caracteres del VIN suelen estar al final.
     return resultado;
-}
-    public boolean respuestaValida(String comando, String respuestaInicial, Boolean comAuxiliar) {
-        if (comAuxiliar) {
-            comandoAuxiliar = false;
-            return true;
-        }
-        if (comando != null && !comando.contains("AT") && !comando.contains(Constants.comandoEncendido) && !comando.contains(Constants.comandoEncendido1)){
-            return !respuestaInicial.contains(NODATA);
-        }
-        return true;
-    }
-
-    public String respuestaAuxiliar(String comando){
-        if ("012F".equals(comando)) return "22F42F";
-        return comando;
-    }
-
-    public boolean validaRespuesta03(String codigoRespuesta){
-        if (codigoRespuesta == null || codigoRespuesta.toLowerCase().contains("n") || codigoRespuesta.length() < 3) return false;
-        for (char caracter : codigoRespuesta.substring(2).toCharArray()){
-            if (caracter != '0') return true;
-        }
-        return false;
-    }
 }
