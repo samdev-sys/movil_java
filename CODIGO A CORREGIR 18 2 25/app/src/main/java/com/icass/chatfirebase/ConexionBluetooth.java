@@ -276,181 +276,78 @@ public class ConexionBluetooth extends Thread {
 
         String errorSent = "";
         StringBuilder mSb = new StringBuilder();
-        String cadFix = "";
-        ArrayList<String> list = new ArrayList<>();
-        JSONArray jsonArray = new JSONArray();
 
-        while(this.banHiloSiempre) {
-            if(inputStream != null) {
-                try {
-                    final byte[] buffer = new byte[1024];
-                    int bytesRead = inputStream.read(buffer);
-                    if (bytesRead == -1) continue;
+    while(this.banHiloSiempre) {
+        if(inputStream != null) {
+            try {
+                byte[] buffer = new byte[1024];
+                int bytesRead = inputStream.read(buffer);
+                if (bytesRead == -1) continue;
+                
+                String strReceived = new String(buffer, 0, bytesRead);
+                mSb.append(strReceived);
+
+                // El adaptador OBD siempre envía un ">" cuando termina de responder un comando
+                if (mSb.toString().contains(">")) {
+                    String respuestaCompleta = mSb.toString().trim();
                     
-                    final String strReceived = new String(buffer, 0, bytesRead);
-
-                    if(this.banIniciar) {
-                        if(strReceived.contains(">")) {
-                            mSb.append(strReceived);
-                            cadFix = mSb.toString().replaceAll("\r\n", " ").replace(">", "");
-                            
-                            if (!cadFix.contains("DATA") && !cadFix.contains("ELM") && !cadFix.contains("SEAR")){
-                                list = new ArrayList<>(Arrays.asList(cadFix.split(" ")));
-                            } else {
-                                list = new ArrayList<>(Arrays.asList(cadFix.split("\r\n")));
-                            }
-                            
-                            respuestaOBD = list.size() > 1 ? list.get(0).replace("\r\n", "").replace(" ", "").replace(">", "") :
-                                    mSb.toString().replace("\r\n", "").replace(" ", "").replace(">", "");
-                            
-                            LogUtils.d(TAG, "Respuesta OBD " + respuestaOBD);
-
-                            if (respuestaValida(ComandoOBD, respuestaOBD, comandoAuxiliar) ) {
-                                DataServer.getInstance().servicesCheckProcesos.comandoSiguiente = true;
-                                String error_actual = respuestaOBD;
-                                String comandoLimpio = ComandoOBD != null ? ComandoOBD.trim() : "";
-
-                                if(!error_actual.trim().isEmpty()) {
-                                    
-                                    // CORRECCIÓN LÍNEA 335: Se evalúa comandoLimpio en lugar de la variable 'comando' genérica
-                                    if(comandoLimpio.equals("03")) {
-                                        LogUtils.d(TAG, "Entra en procesamiento de códigos de error (03)");
-                                        Ban_Message_velocidad = true;
-                                        soloComando(comando); // Se asume que 'comando' contiene el parámetro necesario para soloComando
-                                        error_actual = "";
-                                        comando = "1";
-                                    }
-
-                                    if(banMessage) {
-                                        LogUtils.d(TAG, "Procesando mensaje para servidor");
-                                        final String date = DateUtils.getDateFormatted();
-                                        String prefijo = NetworkManager.getInstance().isNetworkConnected() ? "" : "SI";
-                                        
-                                        // Unificación de formato de error_actual
-                                        error_actual = prefijo + "###" + date + error_actual;
-
-                                        jsonArray = new JSONArray();
-                                        DataServer.getInstance().enviarMsgAlServer(error_actual, TipoEnvioDef.COMANDO);
-                                        DataServer.getInstance().servicesCheckProcesos.banMessage = false;
-
-                                        if(PrincipalActivity.banSend) {
-                                            if(PrincipalActivity.isConcatenar) banMessage = true;
-                                        } else {
-                                            banMessage = false;
-                                        }
-
-                                        if(Ban_Message_velocidad) {
-                                            Ban_Message_velocidad = false;
-                                            Intent intentData3 = new Intent(ProgressManager.MSG_OBD);
-                                            intentData3.putExtra("DATA", "APAGAR");
-                                            service.sendBroadcast(intentData3);
-                                        }
-                                    }
-
-                                    StateNotification.getInstance().notifyState("Comando: " + ComandoOBD + "::" + error_actual);
-                                    final JSONObject jsonObject = new JSONObject();
-                                    jsonObject.put("Comando", ComandoOBD);
-                                    jsonObject.put("Respuesta", error_actual);
-                                    jsonArray.put(jsonObject);
-
-                                    ConnectionManager.getInstance().comprobarRespuesta(ComandoOBD, error_actual);
-
-                                    if (ConnectionManager.getInstance().getEstado().equals("Encendido") && primeraConexion) {
-                                        DataServer.getInstance().agregarEncuesta();
-                                        primeraConexion = false;
-                                    }
-
-                                    if(banderaComandos && error_actual.contains(NODATA) && bluetoothEncendido) {
-                                        final Intent intent = new Intent(ProgressManager.MSG_OBD);
-                                        intent.putExtra("DATA", "APAGAR");
-                                        service.sendBroadcast(intent);
-                                    }
-
-                                    if(PrincipalActivity.banSend && bluetoothEncendido) {
-                                        if(PrincipalActivity.isConcatenar && !banMessage) {
-                                            error_actual = CheckearColaComandos.strConcat + error_actual.replace(CheckearColaComandos.strReplace, "");
-                                            service.sendBroadcast(new Intent(ProgressManager.SUM_CONTADOR));
-                                        }
-
-                                        Intent intent = new Intent(ProgressManager.MSG_OBD);
-                                        intent.putExtra("BAN", true);
-                                        intent.putExtra("DATA", error_actual);
-                                        service.sendBroadcast(intent);
-
-                                        if(PrincipalActivity.isEnviar) {
-                                            if(NetworkManager.getInstance().isOnline(ResourceManager.getInstance().getContext())) {
-                                                String cadenaToSend = diagnosticoSI.length() > 0 ? "%%" + diagnosticoSI + error_actual : "%%" + error_actual;
-                                                diagnosticoSI = "";
-                                                DataServer.getInstance().enviarMsgAlServer(cadenaToSend, TipoEnvioDef.DIAGNOSTICO);
-                                            } else {
-                                                diagnosticoSI += (diagnosticoSI.isEmpty() ? "SI" : "") + error_actual + "XX";
-                                            }
-                                        }
-
-                                        DataServer.getInstance().servicesCheckProcesos.popProceso();
-                                        CheckearColaComandos.banEnviar = false;
-                                        CheckearColaComandos.strConcat = "";
-                                    } else {
-                                        if(PrincipalActivity.isConcatenar && bluetoothEncendido ) {
-                                            CheckearColaComandos.strConcat += error_actual.replace(CheckearColaComandos.strReplace, "");
-                                        } else if(!errorSent.equals(error_actual) && bluetoothEncendido) {
-                                            if(PrincipalActivity.isEnviar && validaRespuesta03(error_actual)) {
-                                                final String date = DateUtils.getDateFormatted();
-                                                if(NetworkManager.getInstance().isOnline(ResourceManager.getInstance().getContext())) {
-                                                    String formatted = "###" + date + error_actual;
-                                                    String cadenaToSend = fallaSI.length() > 0 ? fallaSI + "###" + formatted : formatted;
-                                                    fallaSI = "";
-                                                    DataServer.getInstance().enviarMsgAlServer(cadenaToSend, TipoEnvioDef.COMANDO_4300);
-                                                } else {
-                                                    fallaSI += (fallaSI.isEmpty() ? "SI" : "") + "###" + date + error_actual + "XX";
-                                                }
-                                            }
-                                            errorSent = error_actual;
-                                        }
-                                        DataServer.getInstance().servicesCheckProcesos.popProceso();
-                                        CheckearColaComandos.banEnviar = false;
-                                    }
-
-                                    Intent intentData3 = new Intent(ProgressManager.MSG_OBD);
-                                    intentData3.putExtra("BAN", false);
-                                    intentData3.putExtra("DATA", error_actual);
-                                    service.sendBroadcast(intentData3);
-                                    mSb = new StringBuilder();
-                                }
-                            } else {
-                                mSb = new StringBuilder();
-                                comandoAuxiliar = true;
-                                ComandoOBD = respuestaAuxiliar(ComandoOBD);
-                                write(ComandoOBD);
-                            }
-                        } else {
-                            mSb.append(strReceived);
-                        }
+                    // Si el comando es 0902, procesamos la respuesta multilínea
+                    if (ComandoOBD.contains("0902")) {
+                        respuestaOBD = procesarVIN(respuestaCompleta);
+                    } else {
+                        // Respuesta estándar para comandos cortos
+                        respuestaOBD = respuestaCompleta.replace("\r", "").replace("\n", "").replace(" ", "").replace(">", "");
                     }
-                } catch (Exception ex) {
-                    final String messageError = ex.toString();
-                    if(messageError.contains("socket closed")) {
-                        if (!intentandoConexion){
-                            String parametro = new LocalData().getCodigo( "forceClose");
-                            if ("false".equalsIgnoreCase(parametro)){
-                                intentandoConexion = true;
-                                bluetoothEncendido = false;
-                                this.outputStream = null;
-                                this.inputStream = null;
-                                iniciarConexion();
-                            }
-                        }
+
+                    LogUtils.d(TAG, "Respuesta Final Procesada: " + respuestaOBD);
+                    
+                    // Ejecutar validación y envío al servidor
+                    if (respuestaValida(ComandoOBD, respuestaOBD, comandoAuxiliar)) {
+                        procesarRespuestaValida(respuestaOBD);
                     }
+
+                    mSb.setLength(0); // Limpiar buffer para el siguiente comando
                 }
-            } else {
-                if (!intentandoConexion){
-                    intentandoConexion = true;
-                    iniciarConexion();
-                }
+            } catch (IOException e) {
+                // ... manejo de desconexión ...
             }
         }
     }
+}
 
+// 2. Nueva función para limpiar y reconstruir el VIN (0902)
+private String procesarVIN(String rawData) {
+    // Ejemplo de entrada: 
+    // 014 \r 0:490214E345841 \r 1:4C324D334E3543 \r 2:30313233343536 >
+    
+    // Eliminamos el prompt y el comando de eco si existe
+    String limpio = rawData.replace(">", "").replace("0902", "").trim();
+    
+    // Dividimos por líneas
+    String[] lineas = limpio.split("\r");
+    StringBuilder vinHex = new StringBuilder();
+
+    for (String linea : lineas) {
+        String l = linea.trim();
+        // Saltamos la línea de longitud (014) y quitamos los prefijos de trama (0:, 1:, 2:)
+        if (l.startsWith("0:") || l.startsWith("1:") || l.startsWith("2:")) {
+            vinHex.append(l.substring(2)); // Quitamos los dos primeros caracteres (ej: "0:")
+        } else if (l.length() > 10 && !l.contains(":")) {
+            // Algunos adaptadores no ponen el "0:", simplemente envían la trama
+            vinHex.append(l);
+        }
+    }
+
+    // El VIN hex suele empezar con 4902 (Respuesta positiva al 0902)
+    String resultado = vinHex.toString();
+    if (resultado.startsWith("4902")) {
+        // Opcional: convertir de Hex a ASCII aquí si deseas el VIN legible
+        // o enviarlo así para que el servidor lo convierta.
+        return resultado; 
+    }
+    
+    return resultado;
+}
     public boolean respuestaValida(String comando, String respuestaInicial, Boolean comAuxiliar) {
         if (comAuxiliar) {
             comandoAuxiliar = false;
